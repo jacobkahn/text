@@ -76,6 +76,13 @@ void candidatesAdd(
   }
 }
 
+/**
+ * After accumulating candidates, process and store outputs given current beam
+ * state. We perform three steps in storing candidates:
+ * 1. Filtering by candidates with scores that don't meet a threshold
+ * 2. Merging candidates that correspond to identical states
+ * 3. Sorting candidates by score & pruning - thus enforcing the beam size!
+ */
 template <class DecoderState>
 void candidatesStore(
     std::vector<DecoderState>& candidates,

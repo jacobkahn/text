@@ -126,6 +126,7 @@ void LexiconDecoder::decodeStep(const float* emissions, int T, int N) {
             lmState = lmStateScorePair.first;
             lmScore = lmStateScorePair.second - lexMaxScore;
           }
+
           candidatesAdd(
               candidates_,
               candidatesBestScore_,
@@ -238,6 +239,7 @@ void LexiconDecoder::decodeEnd() {
       break;
     }
   }
+
   for (const LexiconDecoderState& prevHyp :
        hyp_[nDecodedFrames_ - nPrunedFrames_]) {
     const TrieNode* prevLex = prevHyp.lex;
@@ -246,6 +248,7 @@ void LexiconDecoder::decodeEnd() {
     if (!hasNiceEnding || prevHyp.lex == lexicon_->getRoot()) {
       auto lmStateScorePair = lm_->finish(prevLmState);
       auto lmScore = lmStateScorePair.second;
+      // Finish decoding this sequence by adding a word separator/silence token.
       candidatesAdd(
           candidates_,
           candidatesBestScore_,
@@ -262,6 +265,7 @@ void LexiconDecoder::decodeEnd() {
     }
   }
 
+  // filter, merge, and prune candidates
   candidatesStore(
       candidates_,
       candidatePtrs_,
