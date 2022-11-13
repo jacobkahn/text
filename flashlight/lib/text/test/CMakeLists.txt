@@ -14,6 +14,8 @@ if (FL_TEXT_USE_KENLM)
     PREPROC "DECODER_TEST_DATADIR=\"${DIR}/decoder/data\"")
 endif()
 
+build_test(SRC ${DIR}/decoder/Seq2SeqDecoderTest.cpp LIBS ${LIBS})
+
 if (FL_TEXT_BUILD_PYTHON)
   find_package(PythonInterp REQUIRED)
   add_test(
