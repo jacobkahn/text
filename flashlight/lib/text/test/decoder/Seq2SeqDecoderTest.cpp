@@ -28,15 +28,14 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
   const int maxOutputLength = 3;
 
   // Deterministic map from input token idx prediction to output scores.
-  // Score geneneration is considered not to be dependent on the
-  // previous timestep for the purposes of testing
+  // Score geneneration is considered a martingale (i.e. not dependent on
+  // previous timestep) for the purposes of testing
   std::unordered_map<int, std::vector<float>> modelScoreMapping = {
-      {0, {0.}},
-      {1, {0.1, 0.1, 0.5, 0.1}},
-      {2, {0.5, 0.2, 0.2, 0.1}},
-      {3, {0.1, 0.5, 0.1, 0.1}},
+      {0, {0.1, 0.1, 0.5, 0.1}},
+      {1, {0.5, 0.2, 0.2, 0.1}},
+      {2, {0.1, 0.5, 0.1, 0.1}},
   };
-  ASSERT_EQ(modelScoreMapping.size() - 1, T);
+  ASSERT_EQ(modelScoreMapping.size(), T);
 
   // A simulation of model state. These are synthetically created for the test
   // but store information about model scores for the next timestep (which would
@@ -56,23 +55,18 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
     }
   };
 
-  // for testing
-  // std::vector<std::shared_ptr<ModelState>> prevStepModelState;
-
   EmittingModelUpdateFunc updateFunc =
-      [&_emissions = emissions, _T = T, _N = N, &modelScoreMapping
-       // , &prevStepModelState
-  ](const float* emissions,
-      const int N,
-      const int T,
-      const std::vector<int>& prevStepTokenIdxs,
-      const std::vector<EmittingModelStatePtr>& prevStepModelStates,
-      const int& timestep)
+      [&_emissions = emissions, _T = T, _N = N, &modelScoreMapping](
+          const float* emissions,
+          const int N,
+          const int T,
+          const std::vector<int>& prevStepTokenIdxs,
+          const std::vector<EmittingModelStatePtr>& prevStepModelStates,
+          const int& timestep)
       -> std::pair<
           std::vector<std::vector<float>>, // output probs (beamSize x N)
           std::vector<EmittingModelStatePtr> // future beam state
           > {
-    std::cout << "---- timestep " << timestep << std::endl;
     std::cout << "update func called with "
               << " N = " << N << " T = " << T << " prevStepTokenIdxs {";
     for (int i : prevStepTokenIdxs) {
@@ -88,10 +82,6 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
     assert(_N == N);
     assert(_T == T);
     assert(prevStepTokenIdxs.size() == prevStepModelStates.size());
-
-    // Timestep "0" has no score (it's null token)
-    auto& curModelScore = modelScoreMapping[timestep];
-
     if (timestep == 0) {
       // Initial token index is -1 at the first timestep
       assert(prevStepTokenIdxs == std::vector<int>{-1});
@@ -101,41 +91,20 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
     } else {
       // Check proper model state propagation and ordering from prev timestep
       // for (modelScoreMapping[t - 1]
-      for (size_t i = 0; i < prevStepModelStates.size(); ++i) {
-        const auto state =
-            std::static_pointer_cast<ModelState>(prevStepModelStates[i]);
-        assert(state->timestep == timestep - 1);
-        // auto& p = modelScoreMapping[timestep - 1]; // prevTokenScores
-        std::cout << "timestep " << state->timestep << " tokenidx "
-                  << state->tokenIdx << " score " << state->score << std::endl;
-
-        // assert(
-        //     state->tokenIdx ==
-        //     std::max_element(p.begin(), p.end()) - p.begin());
-      }
-
-      // For testing
-      // for (auto el : prevStepModelStates) {
-      //   prevStepModelState.push_back(el);
-      // }
     }
+
+    auto& curModelScore = modelScoreMapping[timestep];
 
     // Create model states from the token indices and timesteps
     std::vector<EmittingModelStatePtr> modelStates;
     for (size_t n = 0; n < prevStepTokenIdxs.size(); ++n) {
-      float score = timestep == 0 ? -1 : curModelScore[n];
-      std::cout << "modelStates push back with n " << n << " cur model score "
-                << score << std::endl;
-      modelStates.emplace_back(ModelState::create(timestep, n, score));
+      modelStates.emplace_back(
+          ModelState::create(timestep, n, /* score = */ curModelScore[n]));
     }
 
     // Pretend token probabilities are the same for each token in the beam
     std::vector<std::vector<float>> outProbs(
-        // something seems wrong here -- this needs to be fixed
-        // check the size of the output probabilities in the
-        // buildseq2sequpdatefunction for transformer in FL
-        prevStepTokenIdxs.size(),
-        curModelScore);
+        prevStepTokenIdxs.size(), curModelScore);
 
     // for (int prevStepTokenIdx : prevStepTokenIdxs) {
     // };
@@ -162,33 +131,11 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
 
   std::vector<DecodeResult> hyps = decoder.getAllFinalHypothesis();
   ASSERT_EQ(hyps.size(), options.beamSize);
-  // Check scores
   ASSERT_FLOAT_EQ(hyps[0].score, 0.5 + 0.5 + 0.5);
   ASSERT_FLOAT_EQ(hyps[1].score, 0.5 + 0.2 + 0.5);
-  // Scores aren't augmented in this test
-  ASSERT_FLOAT_EQ(hyps[0].emittingModelScore, 0.5 + 0.5 + 0.5);
-  ASSERT_FLOAT_EQ(hyps[1].emittingModelScore, 0.5 + 0.2 + 0.5);
-
-  // Check prevStepTokenIdxs
-  // ASSERT_EQ(prevStepModelState[0]);
-  // for (auto& el : prevStepModelStates) {
-  //   const auto state = std::static_pointer_cast<ModelState>(el);
-  //   std::cout << "timestep " << state->timestep << " tokenIdx "
-  //             << state->tokenIdx << " score " << state->score << std::endl;
-  // }
-
-  // ASSERT_EQ(hyps[0].prevStepTokenIdxs, std::vector<int>({-1})); // first step
-  // ASSERT_EQ(
-  //     hyps[1].prevStepTokenIdxs,
-  //     std::vector<int>({2, 3})); // top-k (2) at step 1
-  // ASSERT_EQ(
-  //     hyps[2].prevStepTokenIdxs,
-  //     std::vector<int>({0, 1})) // top-k (2) at step 2
 
   for (auto& hyp : hyps) {
-    ASSERT_EQ(hyp.lmScore, 0); // using ZeroLM
-    ASSERT_EQ(hyp.words.size(), 6);
-    ASSERT_EQ(hyp.tokens.size(), 6);
+    ASSERT_EQ(hyp.lmScore, 0); // since using ZeroLM
     std::cout << "DecodeResult {score = " << hyp.score
               << " emittingModelScore = " << hyp.emittingModelScore
               << " lmScore = " << hyp.lmScore
