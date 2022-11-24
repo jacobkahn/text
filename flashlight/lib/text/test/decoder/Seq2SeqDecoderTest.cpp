@@ -20,23 +20,23 @@
 using namespace fl::lib::text;
 
 TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
-  const int T = 4;
+  const int T = 3;
   const int N = 4;
   std::vector<float> emissions = {1., 2., 3., 4.};
 
   const int eosIdx = 4;
-  const int maxOutputLength = 4;
+  const int maxOutputLength = 3;
 
   // Deterministic map from input token idx prediction to output scores.
   // Score geneneration is considered not to be dependent on the
   // previous timestep for the purposes of testing
   std::unordered_map<int, std::vector<float>> modelScoreMapping = {
-      {0, {0}}, // start token
+      {0, {0.}},
       {1, {0.1, 0.1, 0.5, 0.1}},
       {2, {0.5, 0.2, 0.2, 0.1}},
       {3, {0.1, 0.5, 0.1, 0.1}},
   };
-  ASSERT_EQ(modelScoreMapping.size(), T);
+  ASSERT_EQ(modelScoreMapping.size() - 1, T);
 
   // A simulation of model state. These are synthetically created for the test
   // but store information about model scores for the next timestep (which would
@@ -89,6 +89,9 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
     assert(_T == T);
     assert(prevStepTokenIdxs.size() == prevStepModelStates.size());
 
+    // Timestep "0" has no score (it's null token)
+    auto& curModelScore = modelScoreMapping[timestep];
+
     if (timestep == 0) {
       // Initial token index is -1 at the first timestep
       assert(prevStepTokenIdxs == std::vector<int>{-1});
@@ -102,7 +105,7 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
         const auto state =
             std::static_pointer_cast<ModelState>(prevStepModelStates[i]);
         assert(state->timestep == timestep - 1);
-        auto& p = modelScoreMapping[timestep - 1]; // prevTokenScores
+        // auto& p = modelScoreMapping[timestep - 1]; // prevTokenScores
         std::cout << "timestep " << state->timestep << " tokenidx "
                   << state->tokenIdx << " score " << state->score << std::endl;
 
@@ -117,20 +120,22 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
       // }
     }
 
-    auto& curModelScore = modelScoreMapping[timestep - 1];
-
     // Create model states from the token indices and timesteps
     std::vector<EmittingModelStatePtr> modelStates;
     for (size_t n = 0; n < prevStepTokenIdxs.size(); ++n) {
+      float score = timestep == 0 ? -1 : curModelScore[n];
       std::cout << "modelStates push back with n " << n << " cur model score "
-                << curModelScore[n] << std::endl;
-      modelStates.emplace_back(
-          ModelState::create(timestep, n, /* score = */ curModelScore[n]));
+                << score << std::endl;
+      modelStates.emplace_back(ModelState::create(timestep, n, score));
     }
 
     // Pretend token probabilities are the same for each token in the beam
     std::vector<std::vector<float>> outProbs(
-        prevStepTokenIdxs.size(), curModelScore);
+        // something seems wrong here -- this needs to be fixed
+        // check the size of the output probabilities in the
+        // buildseq2sequpdatefunction for transformer in FL
+        prevStepTokenIdxs.size(),
+        curModelScore);
 
     // for (int prevStepTokenIdx : prevStepTokenIdxs) {
     // };
