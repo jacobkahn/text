@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cassert>
 #include <functional>
+#include <numeric>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -22,7 +23,9 @@ using namespace fl::lib::text;
 TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
   const int T = 3;
   const int N = 4;
-  std::vector<float> emissions = {1., 2., 3., 4.};
+  std::vector<float> emissions(T * N);
+  std::iota(emissions.begin(), emissions.end(), -(T * N) / 2);
+  ASSERT_EQ(emissions.size(), T * N);
 
   const int eosIdx = 4;
   const int maxOutputLength = 3;
@@ -91,6 +94,10 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
     } else {
       // Check proper model state propagation and ordering from prev timestep
       // for (modelScoreMapping[t - 1]
+      for (size_t i = 0; i < prevStepModelStates.size(); ++i) {
+        auto p = std::static_pointer_cast<ModelState>(prevStepModelStates[i]);
+        // TODO: check stuff
+      }
     }
 
     auto& curModelScore = modelScoreMapping[timestep];
@@ -98,8 +105,13 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
     // Create model states from the token indices and timesteps
     std::vector<EmittingModelStatePtr> modelStates;
     for (size_t n = 0; n < prevStepTokenIdxs.size(); ++n) {
-      modelStates.emplace_back(
-          ModelState::create(timestep, n, /* score = */ curModelScore[n]));
+      if (timestep == 0) {
+        modelStates.emplace_back(
+            ModelState::create(timestep, n, /* score = */ -1.)); // dummy state
+      } else {
+        modelStates.emplace_back(
+            ModelState::create(timestep, n, /* score = */ curModelScore[n]));
+      }
     }
 
     // Pretend token probabilities are the same for each token in the beam
