@@ -11,6 +11,7 @@ import logging
 from .flashlight_lib_text_decoder import (
     CriterionType,
     DecodeResult,
+    EmittingModelState,
     LexiconDecoder,
     LexiconDecoderOptions,
     LexiconFreeDecoder,
@@ -19,13 +20,14 @@ from .flashlight_lib_text_decoder import (
     LexiconSeq2SeqDecoderOptions,
     LexiconFreeSeq2SeqDecoder,
     LexiconFreeSeq2SeqDecoderOptions,
-    EmittingModelState,
     LM,
     LMState,
     SmearingMode,
     Trie,
     TrieNode,
     ZeroLM,
+    create_emitting_model_state,
+    get_obj_from_emitting_model_state,
 )
 
 try:

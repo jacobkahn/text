@@ -11,6 +11,7 @@ LICENSE file in the root directory of this source tree.
 
 import math
 import os
+import functools
 import pickle
 import struct
 import unittest
@@ -18,13 +19,18 @@ import unittest
 import numpy as np
 from flashlight.lib.text.decoder import (
     CriterionType,
+    EmittingModelState,
     LexiconDecoder,
     LexiconDecoderOptions,
+    LexiconFreeSeq2SeqDecoderOptions,
+    LexiconFreeSeq2SeqDecoder,
     LexiconFreeDecoder,
     LexiconFreeDecoderOptions,
     SmearingMode,
     Trie,
     ZeroLM,
+    create_emitting_model_state,
+    get_obj_from_emitting_model_state,
 )
 from flashlight.lib.text.dictionary import (
     create_word_dict,
@@ -245,9 +251,122 @@ class DecoderTestCase(unittest.TestCase):
             self.assertAlmostEqual(results[i].score, hyp_score_target[i], places=3)
 
 
-class DecoderSeq2SeqTestCase(unittest.TestCase):
+class Seq2SeqTestModelState(object):
+    """
+    A simulation of model state. These are synthetically created for the test
+    but store information about model scores for the next timestep (i.e.
+    "hidden states" in an autoregressive sense)
+    """
+
+    def __init__(self, timestep, token_idx, score):
+        self.timestep = timestep
+        self.token_idx = token_idx
+        self.score = score
+
+
+class DecoderLexiconFreeSeq2SeqTestCase(unittest.TestCase):
+    def update_func(
+        self,
+        emissions_ptr,
+        N,
+        T,
+        prev_step_token_idxs,
+        prev_step_model_states,
+        timestep,
+    ):
+        """
+        For the purposes of testing, this closure is a method on the test class
+        so it has access to common data that can be internally compared against.
+        Practically, this will be a standalone method that captures other state
+        (i.e. autoregressive models, configurations, reusable buffers, etc).
+        """
+        self.assertEqual(N, self.N)
+        self.assertEqual(T, self.T)
+        self.assertEqual(len(prev_step_token_idxs), len(prev_step_model_states))
+        if timestep == 0:
+            self.assertEqual(prev_step_token_idxs, [-1])
+            # This obj is actually a nullptr internally -- do not use
+            self.assertEqual(len(prev_step_model_states), 1)
+        else:
+            for _prev_state in prev_step_model_states:
+                prev_state = get_obj_from_emitting_model_state(_prev_state)
+                if timestep == 1:
+                    self.assertEqual(prev_state.score, -1)
+                    self.assertEqual(prev_state.token_idx, 0)
+                else:
+                    self.assertGreater(timestep, 1)
+                    scores = self.model_score_mapping[timestep - 1]
+                    max_score = max(scores)
+                    self.assertAlmostEqual(prev_state.score, max_score)
+                    self.assertEqual(prev_state.token_idx, scores.index(max_score))
+
+        cur_model_score = self.model_score_mapping[timestep]
+
+        model_states = []
+        for i, prevStepTokenIdx in enumerate(prev_step_token_idxs):
+            model_states.append(
+                create_emitting_model_state(
+                    Seq2SeqTestModelState(
+                        timestep=timestep,
+                        token_idx=i,
+                        score=(-1 if timestep == 0 else cur_model_score[i]),
+                    )
+                )
+            )
+
+        out_probs = [cur_model_score] * len(prev_step_token_idxs)
+        return out_probs, model_states
+
     def test(self):
-        pass
+        self.T = T = 3
+        self.N = N = 4
+        self.emissions = np.array([i - (T * N) / 2 for i in range(0, T * N)])
+        self.assertEqual(len(self.emissions), T * N)
+
+        beam_size = 2
+        eos_idx = 4
+        max_output_length = 3
+
+        # timestep --> autoregressive scores
+        self.model_score_mapping = {
+            0: [0.1, 0.1, 0.5, 0.1],
+            1: [0.5, 0.2, 0.2, 0.1],
+            2: [0.1, 0.5, 0.1, 0.1],
+        }
+        self.assertEqual(len(self.model_score_mapping), T)
+
+        options = LexiconFreeSeq2SeqDecoderOptions(
+            beam_size=beam_size,
+            beam_size_token=4,
+            beam_threshold=1000,
+            lm_weight=0,
+            eos_score=0,
+            log_add=True,
+        )
+
+        decoder = LexiconFreeSeq2SeqDecoder(
+            options=options,
+            lm=ZeroLM(),
+            eos_idx=eos_idx,
+            update_func=self.update_func,
+            max_output_length=max_output_length,
+        )
+
+        decoder.decode_step(self.emissions.ctypes.data, T, N)
+        hyps = decoder.get_all_final_hypothesis()
+
+        # Validate final hypotheses state
+        self.assertEqual(len(hyps), 2)
+        self.assertAlmostEqual(hyps[0].score, 0.5 + 0.5 + 0.5)
+        self.assertAlmostEqual(hyps[1].score, 0.5 + 0.2 + 0.5)
+
+        for hyp in hyps:
+            self.assertAlmostEqual(hyp.lmScore, 0)  # ZeroLM
+            self.assertAlmostEqual(hyp.score, hyp.emittingModelScore)
+            self.assertEqual(len(hyp.words), len(hyp.tokens))  # since lexfree
+
+        self.assertEqual(hyps[0].tokens, [-1, -1, -1, 2, 0, 1])
+        self.assertEqual(hyps[1].tokens, [-1, -1, -1, 2, 1, 1])
 
 
 class DecoderPickleTestCase(unittest.TestCase):

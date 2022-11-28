@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
@@ -25,6 +26,7 @@ using namespace fl::lib::text;
 using namespace py::literals;
 
 PYBIND11_MAKE_OPAQUE(EmittingModelStatePtr);
+PYBIND11_MAKE_OPAQUE(std::vector<EmittingModelStatePtr>);
 
 namespace {
 
@@ -141,6 +143,27 @@ void LexiconFreeSeq2SeqDecoder_decodeStep(
     int T,
     int N) {
   decoder.decodeStep(reinterpret_cast<const float*>(emissions), T, N);
+}
+
+/*
+ * Create an EmittingModelStatePtr from an arbitrary Python object. Since
+ * py::object refcounts Python and C++ usages (via its copy ctor), we can create
+ * a shared pointer straight away without worrying about lifetime.
+ */
+EmittingModelStatePtr createEmittingModelState(py::object obj) {
+  auto s = std::make_shared<py::object>(std::move(obj));
+  return std::static_pointer_cast<void>(s);
+}
+
+/*
+ * Recover a Python object from an EmittingModelStatePtr. Refcounting of
+ * py::object means we can return a copy.
+ */
+py::object getObjFromEmittingModelState(EmittingModelStatePtr state) {
+  // The only way to create this type from Python is via createModelStatePtr,
+  // which is guaranteed to store a py::object; this is a safe static cast.
+  auto val = std::static_pointer_cast<py::object>(state);
+  return *val;
 }
 
 } // namespace
@@ -480,14 +503,22 @@ PYBIND11_MODULE(flashlight_lib_text_decoder, m) {
       .def_readwrite("log_add", &LexiconFreeSeq2SeqDecoderOptions::logAdd);
 
   py::class_<LexiconSeq2SeqDecoder>(m, "LexiconSeq2SeqDecoder")
-      .def(py::init<
-           LexiconSeq2SeqDecoderOptions,
-           const TriePtr,
-           const LMPtr,
-           const int,
-           EmittingModelUpdateFunc,
-           const int,
-           const bool>())
+      .def(
+          py::init<
+              LexiconSeq2SeqDecoderOptions,
+              const TriePtr,
+              const LMPtr,
+              const int,
+              EmittingModelUpdateFunc,
+              const int,
+              const bool>(),
+          "options"_a,
+          "lm"_a,
+          "trie"_a,
+          "eos_idx"_a,
+          "update_func"_a,
+          "max_output_length"_a,
+          "is_token_lm"_a)
       .def(
           "decode_step",
           &LexiconSeq2SeqDecoder_decodeStep,
@@ -503,15 +534,30 @@ PYBIND11_MODULE(flashlight_lib_text_decoder, m) {
           "get_all_final_hypothesis",
           &LexiconSeq2SeqDecoder::getAllFinalHypothesis);
 
+  // Constructor intentionally omitted -- not to be constructed directly.
+  // create_model_state and get_model_state_obj should be used to create
+  // instances of this type.
   py::class_<EmittingModelStatePtr>(m, "EmittingModelState");
+  m.def("create_emitting_model_state", &createEmittingModelState);
+  m.def("get_obj_from_emitting_model_state", &getObjFromEmittingModelState);
+
+  py::bind_vector<std::vector<EmittingModelStatePtr>>(
+      m, "VectorEmittingModelState");
+  py::implicitly_convertible<py::list, std::vector<EmittingModelStatePtr>>();
 
   py::class_<LexiconFreeSeq2SeqDecoder>(m, "LexiconFreeSeq2SeqDecoder")
-      .def(py::init<
-           LexiconFreeSeq2SeqDecoderOptions,
-           const LMPtr,
-           const int,
-           EmittingModelUpdateFunc,
-           const int>())
+      .def(
+          py::init<
+              LexiconFreeSeq2SeqDecoderOptions,
+              const LMPtr,
+              const int,
+              EmittingModelUpdateFunc,
+              const int>(),
+          "options"_a,
+          "lm"_a,
+          "eos_idx"_a,
+          "update_func"_a,
+          "max_output_length"_a)
       .def(
           "decode_step",
           &LexiconFreeSeq2SeqDecoder_decodeStep,
