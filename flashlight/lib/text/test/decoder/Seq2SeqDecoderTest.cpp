@@ -20,6 +20,24 @@
 
 using namespace fl::lib::text;
 
+// For debugging
+void logSeq2seqUpdateFuncParams(
+    const float* emissions,
+    const int N,
+    const int T,
+    const std::vector<int>& prevStepTokenIdxs,
+    const std::vector<EmittingModelStatePtr>& prevStepModelStates,
+    const int& timestep) {
+  std::cout << "seq2seq update func called with"
+            << " N = " << N << " T = " << T << " prevStepTokenIdxs {";
+  for (int i : prevStepTokenIdxs) {
+    std::cout << i << ", ";
+  }
+  std::cout << "} "
+            << " prevStepModelStates vec of size " << prevStepModelStates.size()
+            << " timestep = " << timestep << std::endl;
+}
+
 TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
   const int T = 3;
   const int N = 4;
@@ -70,15 +88,8 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
           std::vector<std::vector<float>>, // output probs (beamSize x N)
           std::vector<EmittingModelStatePtr> // future beam state
           > {
-    std::cout << "update func called with "
-              << " N = " << N << " T = " << T << " prevStepTokenIdxs {";
-    for (int i : prevStepTokenIdxs) {
-      std::cout << i << ", ";
-    }
-    std::cout << "} "
-              << " prevStepModelStates vec of size "
-              << prevStepModelStates.size() << " timestep = " << timestep
-              << std::endl;
+    // Scores for the current timestep from the conditioning model
+    auto& curModelScore = modelScoreMapping[timestep];
 
     // Can't use gtest in this lambda since it might generate an empty return
     assert(_emissions.data() == emissions); // Should point to the same data
@@ -96,11 +107,21 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
       // for (modelScoreMapping[t - 1]
       for (size_t i = 0; i < prevStepModelStates.size(); ++i) {
         auto p = std::static_pointer_cast<ModelState>(prevStepModelStates[i]);
-        // TODO: check stuff
+        assert(p->timestep == timestep - 1);
+        if (timestep == 1) {
+          // prev timesteps at timestep 1 both have -1 scores and token idx 0
+          assert(p->score == -1);
+          assert(p->tokenIdx == 0);
+        } else {
+          // otherwise, they have the best token score from the prev timestep
+          assert(timestep > 1);
+          const auto prev = modelScoreMapping[timestep - 1];
+          const auto maxScore = std::max_element(prev.begin(), prev.end());
+          assert(p->score == *maxScore);
+          assert(p->tokenIdx == (maxScore - prev.begin())); // idx of max val
+        }
       }
     }
-
-    auto& curModelScore = modelScoreMapping[timestep];
 
     // Create model states from the token indices and timesteps
     std::vector<EmittingModelStatePtr> modelStates;
@@ -117,9 +138,6 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
     // Pretend token probabilities are the same for each token in the beam
     std::vector<std::vector<float>> outProbs(
         prevStepTokenIdxs.size(), curModelScore);
-
-    // for (int prevStepTokenIdx : prevStepTokenIdxs) {
-    // };
 
     return {outProbs, modelStates};
   };
@@ -148,12 +166,13 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
 
   for (auto& hyp : hyps) {
     ASSERT_EQ(hyp.lmScore, 0); // since using ZeroLM
-    std::cout << "DecodeResult {score = " << hyp.score
-              << " emittingModelScore = " << hyp.emittingModelScore
-              << " lmScore = " << hyp.lmScore
-              << " wordsSize = " << hyp.words.size() << " tokensSize "
-              << hyp.tokens.size() << "}" << std::endl;
+    // since we have no score augmentation by emissions/LM
+    ASSERT_FLOAT_EQ(hyp.emittingModelScore, hyp.score);
+    ASSERT_EQ(hyp.words.size(), hyp.tokens.size()); // lexicon-free
   }
+
+  ASSERT_EQ(hyps[0].tokens, std::vector<int>({-1, -1, -1, 2, 0, 1}));
+  ASSERT_EQ(hyps[1].tokens, std::vector<int>({-1, -1, -1, 2, 1, 1}));
 }
 
 int main(int argc, char** argv) {

@@ -245,6 +245,11 @@ class DecoderTestCase(unittest.TestCase):
             self.assertAlmostEqual(results[i].score, hyp_score_target[i], places=3)
 
 
+class DecoderSeq2SeqTestCase(unittest.TestCase):
+    def test(self):
+        pass
+
+
 class DecoderPickleTestCase(unittest.TestCase):
     def cmp_options(self, lhs, rhs):
         self.assertEqual(lhs.beam_size, rhs.beam_size)
