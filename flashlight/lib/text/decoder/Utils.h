@@ -76,13 +76,16 @@ using EmittingModelStatePtr = std::shared_ptr<void>;
  *    after it was used for [batched] score computation.
  */
 using EmittingModelUpdateFunc = std::function<
-    std::pair<
-        std::vector<std::vector<float>>, // A distribution of scores over tokens
-                                         // in the token set (inner vector) for
-                                         // each candidate in the beam (outer
-                                         // vector). This vector must have as
-                                         // many elements as there are
-                                         // candidates in the beam.
+    std::tuple<
+        int, // the size of the beam at this timestep
+        float*, // [beam size x num tokens]
+        /* std::vector<std::vector<float>>, */ // A distribution of scores over
+                                               // tokens in the token set (inner
+                                               // vector) for each candidate in
+                                               // the beam (outer vector). This
+                                               // vector must have as many
+                                               // elements as there are
+                                               // candidates in the beam.
         std::vector<EmittingModelStatePtr>> // A vector of emitting model state;
                                             // each value represents the
                                             // incremental state emitted by

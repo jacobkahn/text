@@ -11,6 +11,9 @@
 #include <functional>
 #include <numeric>
 
+// TODO: debug
+#include <iostream>
+
 #include "flashlight/lib/text/decoder/LexiconFreeSeq2SeqDecoder.h"
 
 namespace fl {
@@ -52,13 +55,22 @@ void LexiconFreeSeq2SeqDecoder::decodeStep(
       break;
     }
 
-    std::vector<std::vector<float>> emittingModelScores;
+    // std::vector<std::vector<float>> emittingModelScores;
+    size_t curBeamSize; // beam size at this timestep
+    float* emittingModelScores;
     std::vector<EmittingModelStatePtr> outStates;
 
-    std::tie(emittingModelScores, outStates) =
+    std::tie(curBeamSize, emittingModelScores, outStates) =
         emittingModelUpdateFunc_(emissions, N, T, rawY_, rawPrevStates_, t);
+    std::cout << "curBeamSize is " << curBeamSize << " first 10 els is "
+              << std::endl;
+    for (size_t i = 0; i < 10; ++i) {
+      std::cout << emittingModelScores[i] << " ";
+    }
 
-    std::vector<size_t> idx(emittingModelScores.back().size());
+    std::vector<size_t> idx(curBeamSize);
+    // std::cout << "idx size is " << idx.size() << std::endl;
+    // std::vector<size_t> idx(emittingModelScores.back().size());
 
     // Generate new hypothesis
     for (int hypo = 0, validHypo = 0; hypo < hyp_[t].size(); hypo++) {
@@ -85,25 +97,40 @@ void LexiconFreeSeq2SeqDecoder::decodeStep(
         continue;
       }
 
+      // Here, validHypo is always the index of a non-EOS hypo
       std::iota(idx.begin(), idx.end(), 0);
-      if (emittingModelScores[validHypo].size() > opt_.beamSizeToken) {
+      // std::cout << "waypoint1 emittingModelScores[validHypo].size() = "
+      //           << curBeamSize << std::endl;
+      if (curBeamSize > opt_.beamSizeToken) {
+        // if (emittingModelScores[validHypo].size() > opt_.beamSizeToken) {
         std::partial_sort(
             idx.begin(),
             idx.begin() + opt_.beamSizeToken,
             idx.end(),
-            [&emittingModelScores, &validHypo](
+            [&emittingModelScores, &validHypo, curBeamSize](
                 const size_t& l, const size_t& r) {
-              return emittingModelScores[validHypo][l] >
-                  emittingModelScores[validHypo][r];
+              // return emittingModelScores[validHypo][l] >
+              //     emittingModelScores[validHypo][r];
+              return emittingModelScores[validHypo * curBeamSize + l] >
+                  emittingModelScores[validHypo * curBeamSize + r];
             });
       }
 
-      for (int r = 0; r <
-           std::min(emittingModelScores[validHypo].size(),
-                    (size_t)opt_.beamSizeToken);
+      for (int r = 0; r < std::min(curBeamSize, (size_t)opt_.beamSizeToken);
+           // std::min(emittingModelScores[validHypo].size(),
+           //          (size_t)opt_.beamSizeToken);
            r++) {
         int n = idx[r];
-        double emittingModelScore = emittingModelScores[validHypo][n];
+
+        // double emittingModelScore = emittingModelScores[validHypo][n];
+        std::cout << "idx - validHypo " << validHypo << " curBeamSize "
+                  << curBeamSize << " n " << n << " idx "
+                  << validHypo * curBeamSize + n << std::endl;
+        const double emittingModelScore =
+            emittingModelScores[validHypo * curBeamSize + n];
+        std::cout << "val " << emittingModelScore << std::endl;
+        // std::cout << "in r loop - emittingModelScore " << emittingModelScore
+        //           << std::endl;
 
         if (n == eos_) { /* (1) Try eos */
           auto lmStateScorePair = lm_->finish(prevHyp.lmState);
@@ -157,7 +184,7 @@ void LexiconFreeSeq2SeqDecoder::decodeStep(
   for (int i = 0; i < hyp_[t].size(); i++) {
     hyp_[maxOutputLength_ + 1][i] = std::move(hyp_[t][i]);
   }
-}
+} // namespace text
 
 std::vector<DecodeResult> LexiconFreeSeq2SeqDecoder::getAllFinalHypothesis()
     const {

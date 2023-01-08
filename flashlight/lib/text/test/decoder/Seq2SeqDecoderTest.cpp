@@ -84,10 +84,13 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
           const std::vector<int>& prevStepTokenIdxs,
           const std::vector<EmittingModelStatePtr>& prevStepModelStates,
           const int& timestep)
-      -> std::pair<
-          std::vector<std::vector<float>>, // output probs (beamSize x N)
+      -> std::tuple<
+          size_t, // current beam size
+          float*, // output probs (beamSize x N)
+          // std::vector<std::vector<float>>, // output probs (beamSize x N)
           std::vector<EmittingModelStatePtr> // future beam state
           > {
+    const size_t curBeamSize = prevStepTokenIdxs.size();
     // Scores for the current timestep from the conditioning model
     auto& curModelScore = modelScoreMapping[timestep];
 
@@ -136,10 +139,31 @@ TEST(Seq2SeqDecoderTest, LexiconFreeBasic) {
     }
 
     // Pretend token probabilities are the same for each token in the beam
-    std::vector<std::vector<float>> outProbs(
-        prevStepTokenIdxs.size(), curModelScore);
+    float* outProbs =
+        new float[prevStepTokenIdxs.size() * curModelScore.size()];
+    // std::cout << "timestep " << timestep << " prevStepTokenIdxs.size() "
+    //           << prevStepTokenIdxs.size() << " curModelScore.size() "
+    //           << curModelScore.size() << std::endl;
+    for (size_t i = 0; i < prevStepTokenIdxs.size(); ++i) {
+      for (size_t j = 0; j < curModelScore.size(); ++j) {
+        outProbs[i * curModelScore.size() + j] = curModelScore[j];
+      }
+      // std::memcpy(
+      //     outProbs + (i * curModelScore.size()),
+      //     curModelScore.data(),
+      //     curModelScore.size());
+    }
 
-    return {outProbs, modelStates};
+    // for (size_t i = 0; i < curModelScore.size() * prevStepTokenIdxs.size();
+    //      ++i) {
+    //   std::cout << outProbs[i] << " ";
+    // }
+    // std::cout << std::endl;
+
+    // std::vector<std::vector<float>> outProbs(
+    //     prevStepTokenIdxs.size(), curModelScore);
+
+    return {curModelScore.size(), outProbs, modelStates};
   };
 
   LexiconFreeSeq2SeqDecoderOptions options;

@@ -52,13 +52,16 @@ void LexiconSeq2SeqDecoder::decodeStep(const float* emissions, int T, int N) {
       break;
     }
 
-    std::vector<std::vector<float>> emittingModelScores;
+    // std::vector<std::vector<float>> emittingModelScores;
+    size_t curBeamSize; // beam size at this timestep
+    float* emittingModelScores;
     std::vector<EmittingModelStatePtr> outStates;
 
-    std::tie(emittingModelScores, outStates) =
+    std::tie(curBeamSize, emittingModelScores, outStates) =
         emittingModelUpdateFunc_(emissions, N, T, rawY_, rawPrevStates_, t);
 
-    std::vector<size_t> idx(emittingModelScores.back().size());
+    std::vector<size_t> idx(curBeamSize);
+    // std::vector<size_t> idx(emittingModelScores.back().size());
 
     // Generate new hypothesis
     for (int hypo = 0, validHypo = 0; hypo < hyp_[t].size(); hypo++) {
@@ -92,24 +95,29 @@ void LexiconSeq2SeqDecoder::decodeStep(const float* emissions, int T, int N) {
           prevLex == lexicon_->getRoot() ? 0 : prevLex->maxScore;
 
       std::iota(idx.begin(), idx.end(), 0);
-      if (emittingModelScores[validHypo].size() > opt_.beamSizeToken) {
+      if (curBeamSize > opt_.beamSizeToken) {
+        // if (emittingModelScores[validHypo].size() > opt_.beamSizeToken) {
         std::partial_sort(
             idx.begin(),
             idx.begin() + opt_.beamSizeToken,
             idx.end(),
-            [&emittingModelScores, &validHypo](
+            [&emittingModelScores, &validHypo, curBeamSize](
                 const size_t& l, const size_t& r) {
-              return emittingModelScores[validHypo][l] >
-                  emittingModelScores[validHypo][r];
+              // return emittingModelScores[validHypo][l] >
+              //     emittingModelScores[validHypo][r];
+              return emittingModelScores[validHypo * curBeamSize + l] >
+                  emittingModelScores[validHypo * curBeamSize + r];
             });
       }
 
-      for (int r = 0; r <
-           std::min(emittingModelScores[validHypo].size(),
-                    (size_t)opt_.beamSizeToken);
+      for (int r = 0; r < std::min(curBeamSize, (size_t)opt_.beamSizeToken);
+           // std::min(emittingModelScores[validHypo].size(),
+           //          (size_t)opt_.beamSizeToken);
            r++) {
         int n = idx[r];
-        double emittingModelScore = emittingModelScores[validHypo][n];
+        // double emittingModelScore = emittingModelScores[validHypo][n];
+        const double emittingModelScore =
+            emittingModelScores[validHypo * curBeamSize + n];
 
         /* (1) Try eos */
         if (n == eos_ && (prevLex == lexicon_->getRoot())) {

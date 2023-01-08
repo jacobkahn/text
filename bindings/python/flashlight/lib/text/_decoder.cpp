@@ -5,6 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#define PYBIND11_DETAILED_ERROR_MESSAGES
+
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -27,6 +29,9 @@ using namespace py::literals;
 
 PYBIND11_MAKE_OPAQUE(EmittingModelStatePtr);
 PYBIND11_MAKE_OPAQUE(std::vector<EmittingModelStatePtr>);
+
+// Don't copy emissions
+PYBIND11_MAKE_OPAQUE(std::vector<float>);
 
 namespace {
 
@@ -448,6 +453,10 @@ PYBIND11_MODULE(flashlight_lib_text_decoder, m) {
                 t[3].cast<std::vector<float>>() // transitions
             );
           }));
+
+  // std::vector<float> is opaque to avoid copies -- see the above
+  py::bind_vector<std::vector<float>>(m, "VectorFloat");
+  py::implicitly_convertible<py::list, std::vector<float>>();
 
   // Seq2seq Decoding
   py::class_<LexiconSeq2SeqDecoderOptions>(m, "LexiconSeq2SeqDecoderOptions")
